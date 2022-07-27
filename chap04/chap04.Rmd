@@ -1,0 +1,411 @@
+---
+title: "RStanBook_chap04"
+author: "Kasahara Masahiro"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    self_contained: TRUE
+    code_folding: hide
+    df_print: paged
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 2
+    theme: "cerulean"
+editor_options:
+  cunk_output_type: inline
+---
+
+```{r knitr_init, echo=FALSE, message=FALSE, warning=FALSE}
+# libtary
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print = 100, stringsAsFactors = FALSE)
+opts_chunk$set(
+  echo=TRUE,
+  tidy=TRUE,
+  comment=NA,
+  message=FALSE,
+  warning=TRUE,
+  eval=TRUE
+)
+
+opts_knit$set(width=75)
+```
+
+## Text
+
+
+
+### lm.R
+
+```{r}
+d <- read.csv(file='input/data-salary.txt')
+res_lm <- lm(Y ~ X, data=d)
+X_new <- data.frame(X=23:60)
+conf_95 <- predict(res_lm, X_new, interval='confidence', level=0.95)
+pred_95 <- predict(res_lm, X_new, interval='prediction', level=0.95)
+```
+
+
+
+### fig4-3.R
+
+```{r}
+library(ggplot2)
+
+d <- read.csv(file='input/data-salary.txt')
+res_lm <- lm(Y ~ X, data=d)
+X_new <- data.frame(X=23:60)
+
+conf_95 <- predict(res_lm, X_new, interval='confidence', level=0.95)
+conf_95 <- data.frame(X_new, conf_95)
+conf_50 <- predict(res_lm, X_new, interval='confidence', level=0.50)
+conf_50 <- data.frame(X_new, conf_50)
+pred_95 <- predict(res_lm, X_new, interval='prediction', level=0.95)
+pred_95 <- data.frame(X_new, pred_95)
+pred_50 <- predict(res_lm, X_new, interval='prediction', level=0.50)
+pred_50 <- data.frame(X_new, pred_50)
+
+ggplot() +
+  theme_bw(base_size=18) +
+  geom_ribbon(data=conf_95, aes(x=X, ymin=lwr, ymax=upr), alpha=1/6) +
+  geom_ribbon(data=conf_50, aes(x=X, ymin=lwr, ymax=upr), alpha=2/6) +
+  geom_line(data=conf_50, aes(x=X, y=fit), size=1) +
+  geom_point(data=d, aes(x=X, y=Y), shape=1, size=3) +
+  labs(x='X', y='Y') + coord_cartesian(xlim=c(22, 61), ylim=c(200, 1400)) +
+  scale_y_continuous(breaks=seq(from=200, to=1400, by=400))
+
+ggplot() +
+  theme_bw(base_size=18) +
+  geom_ribbon(data=pred_95, aes(x=X, ymin=lwr, ymax=upr), alpha=1/6) +
+  geom_ribbon(data=pred_50, aes(x=X, ymin=lwr, ymax=upr), alpha=2/6) +
+  geom_line(data=pred_50, aes(x=X, y=fit), size=1) +
+  geom_point(data=d, aes(x=X, y=Y), shape=1, size=3) +
+  labs(x='X', y='Y') + coord_cartesian(xlim=c(22, 61), ylim=c(200, 1400)) +
+  scale_y_continuous(breaks=seq(from=200, to=1400, by=400))
+```
+
+
+
+### model4-5.stan
+
+```{stan output.var="model4.5"}
+data {
+  int N;
+  real X[N];
+  real Y[N];
+}
+
+parameters {
+  real a;
+  real b;
+  real<lower=0> sigma;
+}
+
+model {
+  for (n in 1:N) {
+    Y[n] ~ normal(a + b*X[n], sigma);
+  }
+}
+```
+
+
+
+### run-model4-5.R
+
+```{r}
+library(rstan)
+
+d <- read.csv(file='input/data-salary.txt')
+data <- list(N=nrow(d), X=d$X, Y=d$Y)
+fit <- sampling(model4.5, data=data, seed=1234)
+
+save.image(file='output/result-model4-5.RData')
+```
+
+
+
+### rstan-save-diagnostics.R
+
+```{r}
+library(rstan)
+
+load('output/result-model4-5.RData')
+
+write.table(data.frame(summary(fit)$summary, check.names=FALSE),
+  file='output/fit-summary.csv', sep=',', quote=TRUE, col.names=NA)
+
+
+library(ggmcmc)
+ggmcmc(ggs(fit, inc_warmup=TRUE, stan_include_auxiliar=TRUE),
+  file='output/fit-traceplot.pdf', plot='traceplot')
+ggmcmc(ggs(fit), file='output/fit-ggmcmc.pdf')
+
+
+library(coda)
+pdf(file='output/fit-traceplot-coda.pdf')
+plot(As.mcmc.list(fit))
+dev.off()
+```
+
+
+
+### fig4-4.R
+
+```{r}
+library(ggmcmc)
+
+load('output/result-model4-5.RData')
+
+ggs_traceplot(ggs(fit, inc_warmup=TRUE, stan_include_auxiliar=TRUE)) +
+  theme_bw(base_size=18) +
+  scale_colour_manual(values=c('#dcdcdc','#a9a9a9','#696969','#000000')) +
+  labs(color='Chain')
+```
+
+
+
+### rsan-modify-MCMCsettings.R
+
+```{r}
+library(rstan)
+
+d <- read.csv(file='input/data-salary.txt')
+data <- list(N=nrow(d), X=d$X, Y=d$Y)
+
+stanmodel <- model4.5
+
+fit <- sampling(
+  stanmodel,
+  data=data,
+  pars=c('b', 'sigma'),
+  init=function() {
+    list(a=runif(1,-10,10), b=runif(1,0,10), sigma=10)
+  },
+  seed=123,
+  chains=3, iter=1000, warmup=200, thin=2
+)
+```
+
+
+
+### rstan-extract-MCMCsamples.R
+
+```{r}
+load('output/result-model4-5.RData')
+
+ms <- rstan::extract(fit)
+N_mcmc <- length(ms$lp__)
+y50_base <- ms$a + ms$b * 50
+y50 <- rnorm(n=N_mcmc, mean=y50_base, sd=ms$sigma)
+d_mcmc <- data.frame(a=ms$a, b=ms$b, sigma=ms$sigma, y50_base, y50)
+```
+
+
+
+### model4-4.stan
+
+```{stan output.var="model4.4"}
+data {
+  int N;
+  real X[N];
+  real Y[N];
+  int N_new;
+  real X_new[N_new];
+}
+
+parameters {
+  real a;
+  real b;
+  real<lower=0> sigma;
+}
+
+transformed parameters {
+  real y_base[N];
+  for (n in 1:N)
+    y_base[n] = a + b*X[n];
+}
+
+model {
+  for (n in 1:N)
+    Y[n] ~ normal(y_base[n], sigma);
+}
+
+generated quantities {
+  real y_base_new[N_new];
+  real y_new[N_new];
+  for (n in 1:N_new) {
+    y_base_new[n] = a + b*X_new[n];
+    y_new[n] = normal_rng(y_base_new[n], sigma);
+  }
+}
+```
+
+
+
+### rum-model4-4.R
+
+```{r}
+library(rstan)
+library(ggplot2)
+
+d <- read.csv(file='input/data-salary.txt')
+X_new <- 23:60
+data <- list(N=nrow(d), X=d$X, Y=d$Y, N_new=length(X_new), X_new=X_new)
+fit <- sampling(model4.4, data=data, seed=1234)
+ms <- rstan::extract(fit)
+
+qua <- apply(ms$y_base_new, 2, quantile, probs=c(0.025, 0.25, 0.50, 0.75, 0.975))
+d_est <- data.frame(X=X_new, t(qua), check.names = FALSE)
+
+ggplot() +  
+  theme_bw(base_size=18) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`2.5%`, ymax=`97.5%`), fill='black', alpha=1/6) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`25%`, ymax=`75%`), fill='black', alpha=2/6) +
+  geom_line(data=d_est, aes(x=X, y=`50%`), size=1) +
+  geom_point(data=d, aes(x=X, y=Y), shape=1, size=3) +
+  coord_cartesian(xlim=c(22, 61), ylim=c(200, 1400)) +
+  scale_y_continuous(breaks=seq(from=200, to=1400, by=400)) +
+  labs(y='Y')
+
+qua <- apply(ms$y_new, 2, quantile, probs=c(0.025, 0.25, 0.50, 0.75, 0.975))
+d_est <- data.frame(X=X_new, t(qua), check.names = FALSE)
+
+ggplot() +  
+  theme_bw(base_size=18) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`2.5%`, ymax=`97.5%`), fill='black', alpha=1/6) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`25%`, ymax=`75%`), fill='black', alpha=2/6) +
+  geom_line(data=d_est, aes(x=X, y=`50%`), size=1) +
+  geom_point(data=d, aes(x=X, y=Y), shape=1, size=3) +
+  coord_cartesian(xlim=c(22, 61), ylim=c(200, 1400)) +
+  scale_y_continuous(breaks=seq(from=200, to=1400, by=400)) +
+  labs(y='Y')
+```
+
+
+
+## Exercise
+
+
+
+### ex01
+
+```{r}
+library(ggplot2)
+
+source('exercise/generate-data.R')
+
+d1 <- data.frame(group=1, Y=Y1)
+d2 <- data.frame(group=2, Y=Y2)
+d <- rbind(d1, d2)
+d$group <- as.factor(d$group)
+
+ggplot(data=d, aes(x=group, y=Y, group=group, col=group)) +
+  geom_boxplot(outlier.shape=NA, alpha=0.3) +
+  geom_point(position=position_jitter(w=0.1, h=0), size=2)
+```
+
+
+
+ ### ex03.stan
+
+```{stan output.var=ex03}
+data {
+  int N1;
+  int N2;
+  real Y1[N1];
+  real Y2[N2];
+}
+
+parameters {
+  real mu1;
+  real mu2;
+  real<lower=0> sigma;
+}
+
+model {
+  for (n in 1:N1)
+    Y1[n] ~ normal(mu1, sigma);
+  for (n in 1:N2)
+    Y2[n] ~ normal(mu2, sigma);
+}
+```
+
+
+
+### ex03.R
+
+```{r}
+library(rstan)
+
+source('exercise/generate-data.R')
+
+data <- list(N1=N1, N2=N2, Y1=Y1, Y2=Y2)
+fit <- sampling(ex03, data=data, seed=1234)
+
+save.image('result-ex3.RData')
+```
+
+
+
+### ex04.R
+
+```{r}
+library(rstan)
+
+load('result-ex3.RData')
+
+ms <- extract(fit)
+
+prob <- mean(ms$mu1 < ms$mu2)  #=> 0.9325
+
+# N_mcmc <- length(ms$mu1)
+# prob <- sum(ms$mu1 < ms$mu2)/N_mcmc  #=> 0.9325
+```
+
+
+
+### ex05.stan
+
+```{stan output.var="ex05"}
+data {
+  int N1;
+  int N2;
+  real Y1[N1];
+  real Y2[N2];
+}
+
+parameters {
+  real mu1;
+  real mu2;
+  real<lower=0> sigma1;
+  real<lower=0> sigma2;
+}
+
+model {
+  for (n in 1:N1)
+    Y1[n] ~ normal(mu1, sigma1);
+  for (n in 1:N2)
+    Y2[n] ~ normal(mu2, sigma2);
+}
+```
+
+
+
+### ex05.R
+
+```{r}
+library(rstan)
+
+source('exercise/generate-data.R')
+
+data <- list(N1=N1, N2=N2, Y1=Y1, Y2=Y2)
+fit <- sampling(ex05, data=data, seed=1234)
+
+ms <- extract(fit)
+prob <- mean(ms$mu1 < ms$mu2)  #=> 0.9457
+
+```
+
